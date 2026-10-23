@@ -1,6 +1,9 @@
 spring:
   application:
     name: open-connect
+  threads:
+    virtual:
+      enabled: true
   # Database Configuration
   datasource:
     url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
@@ -8,11 +11,12 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      minimum-idle: 5
-      maximum-pool-size: 10
-      connection-timeout: 30000
-      idle-timeout: 600000
+      minimum-idle: 10
+      maximum-pool-size: 25
+      connection-timeout: 20000
+      idle-timeout: 300000
       max-lifetime: 1800000
+      leak-detection-threshold: 4000
       pool-name: ChatPool
   # JPA Configuration
   jpa:
@@ -48,6 +52,8 @@ logging:
   level:
     root: ${LOG_LEVEL_ROOT}
     com.pranit.connect: ${LOG_LEVEL}
+    org.springframework.web.socket: INFO
+    org.springframework.messaging: DEBUG
   logback:
     rollingpolicy:
       file-name-pattern: ${LOG_PATH}.%d{yyyy-MM-dd}.%i.log.gz
@@ -63,11 +69,19 @@ management:
         include:
           - health
           - info
+      cors:
+        allowed-origin-patterns: "*"
+        allowed-methods:
+          - GET
+          - POST
+          - OPTIONS
+        allowed-headers: "*"
+        allow-credentials: true
   endpoint:
     health:
       probes:
         enabled: true
-      show-details: when-authorized
+      show-details: always
 info:
   app:
     name: open-connect

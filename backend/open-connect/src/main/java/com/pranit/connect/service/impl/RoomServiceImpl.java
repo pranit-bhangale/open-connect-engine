@@ -9,6 +9,7 @@ import com.pranit.connect.dto.RoomMemberResponse;
 import com.pranit.connect.dto.RoomResponse;
 import com.pranit.connect.entity.ChatRoom;
 import com.pranit.connect.entity.Message;
+import com.pranit.connect.entity.MessageType;
 import com.pranit.connect.entity.RoomMember;
 import com.pranit.connect.entity.RoomStatus;
 import com.pranit.connect.entity.User;
@@ -350,7 +351,8 @@ public class RoomServiceImpl implements RoomService {
             final String sortDirection, final String scrollDirection
     ) {
         validateAndFetchRoomById(roomId);
-        Specification<Message> specification = EntitySpecification.hasRoomId(roomId);
+        Specification<Message> specification = EntitySpecification.hasRoomId(roomId)
+                .and(EntitySpecification.hasMessageType(MessageType.CHAT));
         if (keyword != null && !keyword.isBlank()) {
             specification = specification.and(EntitySpecification.searchMessageKeyword(keyword));
         }
@@ -373,7 +375,31 @@ public class RoomServiceImpl implements RoomService {
         if (!this.roomMemberRepository.existsByRoomAndUser(room, sender)) {
             throw new BaseException("User " + sender.getUsername() + " is not an active member of room: " + room.getRoomCode());
         }
-        // Create and save the message
+        // If the message is a TYPING indicator, broadcast it in real time WITHOUT persisting to database
+        if (request.type() == MessageType.TYPING) {
+            return MessageResponse.builder()
+                    .id(UUID.randomUUID())
+                    .roomDetail(MessageResponse.RoomDetail.builder()
+                            .id(room.getId())
+                            .roomCode(room.getRoomCode())
+                            .roomName(room.getRoomName())
+                            .description(room.getDescription())
+                            .owner(room.getOwner() != null
+                                    ? room.getOwner().getUsername() : null)
+                            .roomStatus(room.getStatus())
+                            .build())
+                    .userDetail(MessageResponse.UserDetail.builder()
+                            .id(sender.getId())
+                            .username(sender.getUsername())
+                            .build())
+                    .content(MessageResponse.MessageContent.builder()
+                            .message(request.content())
+                            .messageType(MessageType.TYPING)
+                            .build())
+                    .sentAt(Instant.now())
+                    .build();
+        }
+        // Only persist actual messages (e.g. CHAT) to the database
         Message message = Message.builder()
                 .room(room)
                 .sender(sender)

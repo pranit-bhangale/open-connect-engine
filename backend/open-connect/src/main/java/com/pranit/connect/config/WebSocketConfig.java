@@ -13,6 +13,11 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(@NonNull StompEndpointRegistry registry) {
+        // Native WebSocket endpoint
+        registry.addEndpoint("/chat")
+                .setAllowedOriginPatterns("*");
+
+        // SockJS fallback endpoint
         registry.addEndpoint("/chat")
                 .setAllowedOriginPatterns("*")
                 .withSockJS();
