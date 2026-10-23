@@ -10,6 +10,7 @@ import com.pranit.connect.wrapper.ScrollResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 
 import java.util.UUID;
 
@@ -21,11 +22,11 @@ public interface RoomService {
 
     RoomResponse joinChatRoom(@Valid JoinRoom request);
 
-    RoomResponse closeRoom(UUID roomId, OwnerDetail detail);
+    RoomResponse closeRoom(UUID roomId, @Valid OwnerDetail detail);
 
     RoomResponse leaveRoom(UUID roomId, @Valid OwnerDetail detail);
 
-    ScrollResponse<MessageResponse> getMessages(String keyword, String scrollId, @Min(1) @Max(5) int pageSize, String sortBy, String sortDirection, String scrollDirection);
+    ScrollResponse<MessageResponse> getMessages(@NotNull UUID roomId, String keyword, String scrollId, @Min(1) @Max(50) int pageSize, String sortBy, String sortDirection, String scrollDirection);
 
     MessageResponse sendMessage(UUID roomId, @Valid MessageRequest request);
 }

@@ -29,16 +29,10 @@ public class RoomCleanupService {
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void nightlyRoomCleanup() {
         log.info("Initiating Cleanup process at: {}", Instant.now());
-        Instant now = Instant.now();
-        Instant timeFrame = now.minus(15, ChronoUnit.DAYS);
-        // Find rooms Open and Closed older than 15 days from creation
-        List<ChatRoom> oldRooms = roomRepository.findAll().stream()
-                .filter(room -> room.getCreatedAt() != null && room.getCreatedAt().isBefore(timeFrame))
-                .limit(100)
-                .toList();
+        final Instant timeFrame = Instant.now().minus(15, ChronoUnit.DAYS);
+        final List<ChatRoom> oldRooms = roomRepository.findTop100ByCreatedAtBeforeOrderByCreatedAtAsc(timeFrame);
         log.info("Found {} rooms older than 15 days to clean up", oldRooms.size());
-        // Clean up each old room
-        for (ChatRoom room : oldRooms) {
+        for (final ChatRoom room : oldRooms) {
             cleanRoomData(room);
         }
         log.info("Finished Cleanup process at: {}", Instant.now());
@@ -47,13 +41,10 @@ public class RoomCleanupService {
     private void cleanRoomData(ChatRoom room) {
         UUID roomId = room.getId();
         String roomCode = room.getRoomCode();
-        // Delete all messages for this room only
         messageRepository.deleteByRoom_Id(roomId);
         log.debug("Cleaned messages from room | name: {} | code: {}", room.getRoomName(), roomCode);
-        // Delete all memberships for this room only
         roomMemberRepository.deleteByRoom_Id(roomId);
         log.debug("Cleaned members from room | name: {} | code: {}", room.getRoomName(), roomCode);
-        // Delete the room entity entirely
         roomRepository.delete(room);
         log.debug("Deleted room entity | code: {}", roomCode);
     }

@@ -3,12 +3,16 @@ package com.pranit.connect.version.service;
 import org.jspecify.annotations.NullMarked;
 import org.springframework.web.accept.ApiVersionParser;
 
+import java.util.Locale;
+
 @NullMarked
-public final class VersionParser implements ApiVersionParser<Integer> {
+public final class VersionParser implements ApiVersionParser<String> {
 
     @Override
-    public Integer parseVersion(String version) {
-        if (!version.matches("v\\d+")) throw new IllegalArgumentException("Invalid API version: " + version);
-        return Integer.parseInt(version.substring(1));
+    public String parseVersion(String version) {
+        if (!version.matches("(?i)v\\d+")) {
+            throw new IllegalArgumentException("Invalid API version: " + version);
+        }
+        return version.toLowerCase(Locale.ROOT);
     }
 }

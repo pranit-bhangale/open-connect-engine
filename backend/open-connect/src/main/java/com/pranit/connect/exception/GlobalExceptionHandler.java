@@ -37,7 +37,7 @@ public class GlobalExceptionHandler {
             final BaseException ex, final HttpServletRequest request) {
         final ResponseStatus responseStatus = ex.getClass().getAnnotation(ResponseStatus.class);
         final HttpStatus status = responseStatus != null
-                ? responseStatus.value() : HttpStatus.INTERNAL_SERVER_ERROR;
+                ? responseStatus.value() : HttpStatus.BAD_REQUEST;
         return buildResponse(status, ex.getMessage(), request);
     }
 
