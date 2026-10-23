@@ -57,6 +57,12 @@ public class RoomController {
         return ResponseEntity.status(HttpStatus.OK).body(response);
     }
 
+    @PatchMapping(value = "/{id}/leave", version = "v1")
+    public ResponseEntity<RoomResponse> leaveChatRoom(@PathVariable("id") UUID roomId, @RequestBody @Valid OwnerDetail detail) {
+        final RoomResponse response = this.roomService.leaveRoom(roomId, detail);
+        return ResponseEntity.status(HttpStatus.OK).body(response);
+    }
+
     @GetMapping(value = "/messages", version = "v1")
     public ResponseEntity<ScrollResponse<MessageResponse>> getMessages(
             @RequestParam(required = false) String keyword,

@@ -9,4 +9,5 @@ import java.util.UUID;
 
 @Repository
 public interface MessageRepository extends JpaRepository<Message, UUID>, JpaSpecificationExecutor<Message> {
+    void deleteByRoom_Id(UUID roomId);
 }

@@ -2,6 +2,7 @@ package com.pranit.connect.service.impl;
 
 import com.pranit.connect.dto.CreateRoom;
 import com.pranit.connect.dto.JoinRoom;
+import com.pranit.connect.dto.MessageRequest;
 import com.pranit.connect.dto.MessageResponse;
 import com.pranit.connect.dto.OwnerDetail;
 import com.pranit.connect.dto.RoomMemberResponse;
@@ -11,6 +12,7 @@ import com.pranit.connect.entity.Message;
 import com.pranit.connect.entity.RoomMember;
 import com.pranit.connect.entity.RoomStatus;
 import com.pranit.connect.entity.User;
+import com.pranit.connect.event.RoomEvent;
 import com.pranit.connect.exception.RoomClosedException;
 import com.pranit.connect.exception.RoomNotFoundException;
 import com.pranit.connect.repository.ChatRoomRepository;
@@ -23,6 +25,7 @@ import com.pranit.connect.specification.EntitySpecification;
 import com.pranit.connect.wrapper.ScrollResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.messaging.simp.SimpMessageSendingOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +44,7 @@ public class RoomServiceImpl implements RoomService {
     private final UserRepository userRepository;
     private final RoomMemberRepository roomMemberRepository;
     private final MessageRepository messageRepository;
+    private final SimpMessageSendingOperations messagingTemplate;
 
     private String generateRoomCode() {
         String code;
@@ -90,6 +94,7 @@ public class RoomServiceImpl implements RoomService {
                 .userName(owner.getUsername())
                 .joinedAt(member.getJoinedAt())
                 .build();
+        publishPresenceEvent(room, member.getUser().getId(), member.getUser().getUsername(), RoomEvent.EventType.JOINED);
         // Build and return RoomResponse
         return RoomResponse.builder()
                 .user(RoomResponse.UserResponse.builder()
@@ -173,24 +178,26 @@ public class RoomServiceImpl implements RoomService {
         }
         // Check if user is already a member
         final boolean isMember = this.roomMemberRepository.existsByRoomAndUser(room, user);
+        RoomMember member = null;
         if (!isMember) {
             // Add user as room member
-            RoomMember member = RoomMember.builder()
+            member = RoomMember.builder()
                     .room(room)
                     .user(user)
                     .joinedAt(Instant.now())
                     .build();
             this.roomMemberRepository.save(member);
         }
+        publishPresenceEvent(room, user.getId(), user.getUsername(), RoomEvent.EventType.JOINED);
         // Map all room members, not just the joining user
         final List<RoomMemberResponse> members = this.roomMemberRepository.findByRoom_Id(room.getId())
                 .stream()
-                .map(member -> RoomMemberResponse.builder()
+                .map(m -> RoomMemberResponse.builder()
                         .roomId(room.getId())
                         .roomName(room.getRoomName())
-                        .userId(member.getUser().getId())
-                        .userName(member.getUser().getUsername())
-                        .joinedAt(member.getJoinedAt())
+                        .userId(m.getUser().getId())
+                        .userName(m.getUser().getUsername())
+                        .joinedAt(m.getJoinedAt())
                         .build())
                 .toList();
         final User roomOwner = room.getOwner();
@@ -221,13 +228,15 @@ public class RoomServiceImpl implements RoomService {
     public RoomResponse closeRoom(final UUID roomId, final OwnerDetail detail) {
         final ChatRoom room = this.validateAndFetchRoomById(roomId);
         // Look up the user trying to close the room
-        final User closer = userRepository.findByEmailAndUsername(detail.email(), detail.username())
+        final User closer = this.userRepository.findByEmailAndUsername(detail.email(), detail.username())
                 .orElseThrow(() -> new RoomNotFoundException("User not found"));
-        // Business rule: only the room owner can close the room
+        // only the room owner can close the room
         if (!room.getOwner().getId().equals(closer.getId())) {
             throw new RoomClosedException("Only the room owner can close the room");
         }
         if (room.getStatus() != RoomStatus.CLOSED) {
+            this.messageRepository.deleteByRoom_Id(roomId);
+            this.roomMemberRepository.deleteByRoom_Id(roomId);
             // Set room to closed status
             room.setStatus(RoomStatus.CLOSED);
             room.setClosedBy(closer);
@@ -246,7 +255,7 @@ public class RoomServiceImpl implements RoomService {
                         .joinedAt(member.getJoinedAt())
                         .build())
                 .toList();
-
+        publishPresenceEvent(room, closer.getId(), closer.getUsername(), RoomEvent.EventType.CLOSED);
         return RoomResponse.builder()
                 .user(RoomResponse.UserResponse.builder()
                         .id(owner.getId())
@@ -271,6 +280,54 @@ public class RoomServiceImpl implements RoomService {
     }
 
     @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
+    public RoomResponse leaveRoom(final UUID roomId, final OwnerDetail detail) {
+        final ChatRoom room = this.validateAndFetchRoomById(roomId);
+        // Look up the user trying to leave
+        final User leaver = this.userRepository.findByEmailAndUsername(detail.email(), detail.username())
+                .orElseThrow(() -> new RoomNotFoundException("User not found"));
+        if (!this.roomMemberRepository.existsByRoomAndUser(room, leaver)) {
+            throw new RoomNotFoundException("User is not a member of room: " + room.getRoomCode());
+        }
+        // Remove user from room members
+        this.roomMemberRepository.deleteByRoomAndUser(room, leaver);
+        // Publish LEAVED event to all users in the room
+        publishPresenceEvent(room, leaver.getId(), leaver.getUsername(), RoomEvent.EventType.LEFT);
+        // Fetch remaining members
+        final List<RoomMemberResponse> memberResponses = this.roomMemberRepository.findByRoom_Id(room.getId())
+                .stream()
+                .map(member -> RoomMemberResponse.builder()
+                        .roomId(room.getId())
+                        .roomName(room.getRoomName())
+                        .userId(member.getUser().getId())
+                        .userName(member.getUser().getUsername())
+                        .joinedAt(member.getJoinedAt())
+                        .build())
+                .toList();
+        final User owner = room.getOwner();
+        return RoomResponse.builder()
+                .user(RoomResponse.UserResponse.builder()
+                        .id(owner.getId())
+                        .username(owner.getUsername())
+                        .email(owner.getEmail())
+                        .build())
+                .room(RoomResponse.RoomDetail.builder()
+                        .id(room.getId())
+                        .roomCode(room.getRoomCode())
+                        .roomName(room.getRoomName())
+                        .description(room.getDescription())
+                        .owner(owner.getUsername())
+                        .roomStatus(room.getStatus())
+                        .closedBy(room.getClosedBy() != null
+                                ? room.getClosedBy().getUsername() : null)
+                        .closedAt(room.getClosedAt())
+                        .roomMembers(memberResponses)
+                        .createdAt(room.getCreatedAt())
+                        .build())
+                .build();
+    }
+
+    @Override
     @Transactional(propagation = Propagation.REQUIRED, readOnly = true)
     public ScrollResponse<MessageResponse> getMessages(
             final String keyword, final String scrollId,
@@ -283,8 +340,40 @@ public class RoomServiceImpl implements RoomService {
                 allowedSortProperties, MessageResponse::from);
     }
 
+    @Override
+    public MessageResponse sendMessage(UUID roomId, MessageRequest request) {
+        final ChatRoom room = validateAndFetchRoomById(roomId);
+        if (room.getStatus() == RoomStatus.CLOSED) {
+            throw new RoomClosedException("Chat room #" + roomId + " is closed. No further messages can be sent.");
+        }
+        // Look up the sender user
+        final User sender = this.userRepository.findById(request.senderId())
+                .orElseThrow(() -> new RoomNotFoundException("Sender not found with ID: " + request.senderId()));
+        // Create and save the message
+        Message message = Message.builder()
+                .room(room)
+                .sender(sender)
+                .content(request.content())
+                .type(request.type())
+                .build();
+        message = this.messageRepository.save(message);
+        return MessageResponse.from(message);
+    }
+
     private ChatRoom validateAndFetchRoomById(final UUID roomId) {
         return this.roomRepository.findById(roomId)
                 .orElseThrow(() -> new RoomNotFoundException("Room not found with ID: " + roomId));
+    }
+
+    private void publishPresenceEvent(ChatRoom room, UUID userId, String username, RoomEvent.EventType eventType) {
+        messagingTemplate.convertAndSend("/topic/room/" + room.getId() + "/presence",
+                RoomEvent.builder()
+                        .roomId(room.getId())
+                        .userId(userId)
+                        .username(username)
+                        .eventType(eventType)
+                        .timestamp(Instant.now())
+                        .roomStatus(room.getStatus())
+                        .build());
     }
 }
