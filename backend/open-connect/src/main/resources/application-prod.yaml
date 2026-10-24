@@ -1,6 +1,8 @@
 spring:
   application:
     name: open-connect
+  server:
+    port: ${PORT}
   threads:
     virtual:
       enabled: true
