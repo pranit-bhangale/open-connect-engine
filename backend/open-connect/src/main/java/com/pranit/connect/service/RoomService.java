@@ -26,7 +26,9 @@ public interface RoomService {
 
     RoomResponse leaveRoom(UUID roomId, @Valid OwnerDetail detail);
 
-    ScrollResponse<MessageResponse> getMessages(@NotNull UUID roomId, String keyword, String scrollId, @Min(1) @Max(50) int pageSize, String sortBy, String sortDirection, String scrollDirection);
+    ScrollResponse<MessageResponse> getMessages
+            (@NotNull UUID roomId, String userEmail, String userName, String keyword, String scrollId,
+             @Min(1) @Max(50) int pageSize, String sortBy, String sortDirection, String scrollDirection);
 
     MessageResponse sendMessage(UUID roomId, @Valid MessageRequest request);
 }

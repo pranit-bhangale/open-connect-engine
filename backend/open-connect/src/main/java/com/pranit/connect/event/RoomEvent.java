@@ -1,6 +1,5 @@
 package com.pranit.connect.event;
 
-
 import com.pranit.connect.entity.RoomStatus;
 import lombok.Builder;
 
@@ -14,9 +13,11 @@ public record RoomEvent(
         String username,
         EventType eventType,
         Instant timestamp,
-        RoomStatus roomStatus
+        RoomStatus roomStatus,
+        boolean isHost,
+        boolean isHostOnline
 ) {
     public enum EventType {
-        JOINED, LEFT, CLOSED
+        JOINED, LEFT, CLOSED, HOST_STATUS
     }
 }

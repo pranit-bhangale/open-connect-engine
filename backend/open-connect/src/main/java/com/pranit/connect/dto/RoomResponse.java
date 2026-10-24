@@ -16,7 +16,8 @@ public record RoomResponse(
     public record UserResponse(
             UUID id,
             String username,
-            String email
+            String email,
+            boolean isHost
     ) {
     }
 
@@ -29,6 +30,7 @@ public record RoomResponse(
             String owner,
             String closedBy,
             RoomStatus roomStatus,
+            boolean isHostOnline,
             List<RoomMemberResponse> roomMembers,
             Instant createdAt,
             Instant closedAt

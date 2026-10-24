@@ -13,11 +13,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(@NonNull StompEndpointRegistry registry) {
-        // Native WebSocket endpoint
         registry.addEndpoint("/chat")
                 .setAllowedOriginPatterns("*");
-
-        // SockJS fallback endpoint
         registry.addEndpoint("/chat")
                 .setAllowedOriginPatterns("*")
                 .withSockJS();
@@ -25,11 +22,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureMessageBroker(@NonNull MessageBrokerRegistry registry) {
-        // Enabling prefix based destination routing for both topics and user queues
         registry.enableSimpleBroker("/topic", "/queue");
-        // Register application prefix
         registry.setApplicationDestinationPrefixes("/app");
-        // Register user destination prefix
         registry.setUserDestinationPrefix("/user");
     }
 }

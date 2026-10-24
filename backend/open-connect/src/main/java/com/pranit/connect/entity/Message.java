@@ -1,6 +1,8 @@
 package com.pranit.connect.entity;
 
+import com.pranit.connect.crypto.EncryptedContentConverter;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -49,6 +51,7 @@ public class Message {
     @JoinColumn(name = "sender_id", nullable = false)
     private User sender;
 
+    @Convert(converter = EncryptedContentConverter.class)
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
 

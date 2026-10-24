@@ -38,6 +38,31 @@ spring:
     validate-on-migrate: true
     clean-disabled: true
     out-of-order: false
+  # Java Mail Sender Configuration
+  mail:
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    protocol: ${MAIL_PROTOCOL}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+# Host Configuration
+host:
+  email: ${HOST_EMAIL}
+  portfolio-url: ${HOST_PORTFOLIO}
+# Security & Message Encryption Configuration
+security:
+  chat:
+    encryption:
+      secret-key: ${CHAT_ENCRYPTION_KEY}
 # Swagger Configuration
 springdoc:
   default-produces-media-type: application/json
@@ -63,6 +88,9 @@ logging:
       clean-history-on-start: false
 # Actuator Configuration
 management:
+  health:
+    mail:
+      enabled: false
   endpoints:
     web:
       exposure:

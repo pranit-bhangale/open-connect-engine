@@ -17,15 +17,18 @@ import com.pranit.connect.event.RoomEvent;
 import com.pranit.connect.exception.BaseException;
 import com.pranit.connect.exception.RoomClosedException;
 import com.pranit.connect.exception.RoomNotFoundException;
+import com.pranit.connect.mail.event.RoomCreatedEvent;
 import com.pranit.connect.repository.ChatRoomRepository;
 import com.pranit.connect.repository.MessageRepository;
 import com.pranit.connect.repository.RoomMemberRepository;
 import com.pranit.connect.repository.UserRepository;
 import com.pranit.connect.scroll.api.Scroll;
+import com.pranit.connect.service.ChatBotService;
 import com.pranit.connect.service.RoomService;
 import com.pranit.connect.specification.EntitySpecification;
 import com.pranit.connect.wrapper.ScrollResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
 import org.springframework.stereotype.Service;
@@ -33,7 +36,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -47,13 +49,14 @@ public class RoomServiceImpl implements RoomService {
     private final RoomMemberRepository roomMemberRepository;
     private final MessageRepository messageRepository;
     private final SimpMessageSendingOperations messagingTemplate;
+    private final ApplicationEventPublisher eventPublisher;
+    private final ChatBotService chatBotService;
 
     @Override
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public RoomResponse createNewRoom(final CreateRoom request) {
         final CreateRoom.UserRequest ur = request.user();
         final CreateRoom.RoomRequest rr = request.room();
-        // Look up or create/update user from the request
         final User owner = userRepository.findByEmail(ur.email())
                 .map(existing -> {
                     if (!existing.getUsername().equals(ur.username())) {
@@ -66,9 +69,7 @@ public class RoomServiceImpl implements RoomService {
                         .username(ur.username())
                         .email(ur.email())
                         .build()));
-        // Generate a unique room code
         final String roomCode = generateRoomCode();
-        // Create and save the chat room
         ChatRoom room = ChatRoom.builder()
                 .roomCode(roomCode)
                 .roomName(rr.roomName())
@@ -77,28 +78,38 @@ public class RoomServiceImpl implements RoomService {
                 .status(RoomStatus.OPEN)
                 .build();
         room = roomRepository.save(room);
-        // Add owner as room member
-        RoomMember member = RoomMember.builder()
+        final RoomMember member = RoomMember.builder()
                 .room(room)
                 .user(owner)
                 .joinedAt(Instant.now())
                 .build();
-        member = roomMemberRepository.save(member);
-        // Build RoomMemberResponse for the response
-        final RoomMemberResponse memberResponse = RoomMemberResponse.builder()
-                .roomId(room.getId())
+        roomMemberRepository.save(member);
+        this.chatBotService.initializeRoomAndHost(room, owner);
+        publishPresenceEvent(room, member.getUser(), RoomEvent.EventType.JOINED);
+        this.eventPublisher.publishEvent(RoomCreatedEvent.builder()
+                .creatorName(owner.getUsername())
+                .creatorEmail(owner.getEmail())
                 .roomName(room.getRoomName())
-                .userId(owner.getId())
-                .userName(owner.getUsername())
-                .joinedAt(member.getJoinedAt())
-                .build();
-        publishPresenceEvent(room, member.getUser().getId(), member.getUser().getUsername(), RoomEvent.EventType.JOINED);
-        // Build and return RoomResponse
+                .roomCode(room.getRoomCode())
+                .build());
+        final List<RoomMemberResponse> memberResponses = this.roomMemberRepository
+                .findByRoom_Id(room.getId())
+                .stream()
+                .map(m -> RoomMemberResponse.builder()
+                        .roomId(m.getRoom().getId())
+                        .roomName(m.getRoom().getRoomName())
+                        .userId(m.getUser().getId())
+                        .userName(m.getUser().getUsername())
+                        .isHost(this.chatBotService.isHost(m.getUser()))
+                        .joinedAt(m.getJoinedAt())
+                        .build())
+                .toList();
         return RoomResponse.builder()
                 .user(RoomResponse.UserResponse.builder()
                         .id(owner.getId())
                         .username(owner.getUsername())
                         .email(owner.getEmail())
+                        .isHost(this.chatBotService.isHost(owner))
                         .build())
                 .room(RoomResponse.RoomDetail.builder()
                         .id(room.getId())
@@ -107,10 +118,11 @@ public class RoomServiceImpl implements RoomService {
                         .description(room.getDescription())
                         .owner(owner.getUsername())
                         .roomStatus(room.getStatus())
+                        .isHostOnline(this.chatBotService.isHostOnline(room.getId()))
                         .closedBy(room.getClosedBy() != null
                                 ? room.getClosedBy().getUsername() : null)
                         .closedAt(room.getClosedAt())
-                        .roomMembers(Collections.singletonList(memberResponse))
+                        .roomMembers(memberResponses)
                         .createdAt(room.getCreatedAt())
                         .build())
                 .build();
@@ -124,8 +136,13 @@ public class RoomServiceImpl implements RoomService {
         return code;
     }
 
-    private void publishPresenceEvent(ChatRoom room, UUID userId, String username, RoomEvent.EventType eventType) {
-        messagingTemplate.convertAndSend("/topic/room/" + room.getId() + "/presence",
+    private void publishPresenceEvent(final ChatRoom room, final User user, final RoomEvent.EventType eventType) {
+        publishPresenceEvent(room, user.getId(), user.getUsername(), eventType, this.chatBotService.isHost(user));
+    }
+
+    private void publishPresenceEvent(final ChatRoom room, final UUID userId, final String username, final RoomEvent.EventType eventType, final boolean isHost) {
+        final boolean hostOnline = this.chatBotService.isHostOnline(room.getId());
+        this.messagingTemplate.convertAndSend("/topic/room/" + room.getId() + "/presence",
                 RoomEvent.builder()
                         .roomId(room.getId())
                         .userId(userId)
@@ -133,6 +150,8 @@ public class RoomServiceImpl implements RoomService {
                         .eventType(eventType)
                         .timestamp(Instant.now())
                         .roomStatus(room.getStatus())
+                        .isHost(isHost)
+                        .isHostOnline(hostOnline)
                         .build());
     }
 
@@ -148,6 +167,7 @@ public class RoomServiceImpl implements RoomService {
                         .roomName(room.getRoomName())
                         .userId(member.getUser().getId())
                         .userName(member.getUser().getUsername())
+                        .isHost(this.chatBotService.isHost(member.getUser()))
                         .joinedAt(member.getJoinedAt())
                         .build())
                 .toList();
@@ -156,6 +176,7 @@ public class RoomServiceImpl implements RoomService {
                         .id(owner.getId())
                         .username(owner.getUsername())
                         .email(owner.getEmail())
+                        .isHost(this.chatBotService.isHost(owner))
                         .build())
                 .room(RoomResponse.RoomDetail.builder()
                         .id(room.getId())
@@ -164,6 +185,7 @@ public class RoomServiceImpl implements RoomService {
                         .description(room.getDescription())
                         .owner(owner.getUsername())
                         .roomStatus(room.getStatus())
+                        .isHostOnline(this.chatBotService.isHostOnline(room.getId()))
                         .closedBy(room.getClosedBy() != null
                                 ? room.getClosedBy().getUsername() : null)
                         .closedAt(room.getClosedAt())
@@ -178,7 +200,6 @@ public class RoomServiceImpl implements RoomService {
     public RoomResponse joinChatRoom(final JoinRoom request) {
         final JoinRoom.UserRequest ur = request.user();
         final JoinRoom.RoomDetail dr = request.detail();
-        // Look up or create/update user from the request
         final User user = this.userRepository.findByEmail(ur.email())
                 .map(existing -> {
                     if (!existing.getUsername().equals(ur.username())) {
@@ -191,14 +212,11 @@ public class RoomServiceImpl implements RoomService {
                         .username(ur.username())
                         .email(ur.email())
                         .build()));
-        // Find room by roomCode
         final ChatRoom room = this.roomRepository.findByRoomCode(dr.roomCode())
                 .orElseThrow(() -> new RoomNotFoundException("Room not found with code: " + dr.roomCode()));
-        // Check room status
         if (room.getStatus() != RoomStatus.OPEN) {
             throw new RoomClosedException("Cannot join a closed room");
         }
-        // Check if user is already a member
         final boolean isMember = this.roomMemberRepository.existsByRoomAndUser(room, user);
         if (!isMember) {
             final RoomMember member = RoomMember.builder()
@@ -208,15 +226,17 @@ public class RoomServiceImpl implements RoomService {
                     .build();
             this.roomMemberRepository.save(member);
         }
-        publishPresenceEvent(room, user.getId(), user.getUsername(), RoomEvent.EventType.JOINED);
-        // Fetch all room members
-        final List<RoomMemberResponse> members = this.roomMemberRepository.findByRoom_Id(room.getId())
+        if (this.chatBotService.isHost(user)) this.chatBotService.markHostActive(room.getId());
+        publishPresenceEvent(room, user, RoomEvent.EventType.JOINED);
+        final List<RoomMemberResponse> members = this.roomMemberRepository
+                .findByRoom_Id(room.getId())
                 .stream()
                 .map(m -> RoomMemberResponse.builder()
                         .roomId(room.getId())
                         .roomName(room.getRoomName())
                         .userId(m.getUser().getId())
                         .userName(m.getUser().getUsername())
+                        .isHost(this.chatBotService.isHost(m.getUser()))
                         .joinedAt(m.getJoinedAt())
                         .build())
                 .toList();
@@ -226,6 +246,7 @@ public class RoomServiceImpl implements RoomService {
                         .id(user.getId())
                         .username(user.getUsername())
                         .email(user.getEmail())
+                        .isHost(this.chatBotService.isHost(user))
                         .build())
                 .room(RoomResponse.RoomDetail.builder()
                         .id(room.getId())
@@ -234,6 +255,7 @@ public class RoomServiceImpl implements RoomService {
                         .description(room.getDescription())
                         .owner(roomOwner.getUsername())
                         .roomStatus(room.getStatus())
+                        .isHostOnline(this.chatBotService.isHostOnline(room.getId()))
                         .closedBy(room.getClosedBy() != null
                                 ? room.getClosedBy().getUsername() : null)
                         .closedAt(room.getClosedAt())
@@ -247,13 +269,12 @@ public class RoomServiceImpl implements RoomService {
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public RoomResponse closeRoom(final UUID roomId, final OwnerDetail detail) {
         final ChatRoom room = this.validateAndFetchRoomById(roomId);
-        // Look up the user trying to close the room
         final User closer = this.userRepository.findByEmail(detail.email())
                 .orElseThrow(() -> new RoomNotFoundException("User not found with email: " + detail.email()));
-        // Only the room owner can close the room
-        if (!room.getOwner().getId().equals(closer.getId())) {
-            throw new RoomClosedException("Only the room owner can close the room");
+        if (!this.chatBotService.isHost(closer)) {
+            throw new RoomClosedException("Only the portfolio owner can close chat rooms.");
         }
+        this.chatBotService.markHostInactive(roomId);
         if (room.getStatus() != RoomStatus.CLOSED) {
             room.setStatus(RoomStatus.CLOSED);
             room.setClosedBy(closer);
@@ -261,22 +282,25 @@ public class RoomServiceImpl implements RoomService {
         }
         final ChatRoom savedRoom = roomRepository.save(room);
         final User owner = room.getOwner();
-        final List<RoomMemberResponse> memberResponses = this.roomMemberRepository.findByRoom_Id(room.getId())
+        final List<RoomMemberResponse> memberResponses = this.roomMemberRepository
+                .findByRoom_Id(room.getId())
                 .stream()
                 .map(member -> RoomMemberResponse.builder()
                         .roomId(savedRoom.getId())
                         .roomName(savedRoom.getRoomName())
                         .userId(member.getUser().getId())
                         .userName(member.getUser().getUsername())
+                        .isHost(this.chatBotService.isHost(member.getUser()))
                         .joinedAt(member.getJoinedAt())
                         .build())
                 .toList();
-        publishPresenceEvent(room, closer.getId(), closer.getUsername(), RoomEvent.EventType.CLOSED);
+        publishPresenceEvent(room, closer, RoomEvent.EventType.CLOSED);
         return RoomResponse.builder()
                 .user(RoomResponse.UserResponse.builder()
                         .id(owner.getId())
                         .username(owner.getUsername())
                         .email(owner.getEmail())
+                        .isHost(this.chatBotService.isHost(owner))
                         .build())
                 .room(RoomResponse.RoomDetail.builder()
                         .id(room.getId())
@@ -285,6 +309,7 @@ public class RoomServiceImpl implements RoomService {
                         .description(room.getDescription())
                         .owner(owner.getUsername())
                         .roomStatus(room.getStatus())
+                        .isHostOnline(false)
                         .closedBy(room.getClosedBy() != null
                                 ? room.getClosedBy().getUsername() : null)
                         .closedAt(room.getClosedAt())
@@ -298,24 +323,25 @@ public class RoomServiceImpl implements RoomService {
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public RoomResponse leaveRoom(final UUID roomId, final OwnerDetail detail) {
         final ChatRoom room = this.validateAndFetchRoomById(roomId);
-        // Look up the user trying to leave
         final User leaver = this.userRepository.findByEmail(detail.email())
                 .orElseThrow(() -> new RoomNotFoundException("User not found with email: " + detail.email()));
         if (!this.roomMemberRepository.existsByRoomAndUser(room, leaver)) {
             throw new RoomNotFoundException("User is not a member of room: " + room.getRoomCode());
         }
-        // Remove user from room members
         this.roomMemberRepository.deleteByRoomAndUser(room, leaver);
-        // Publish LEFT event to all users in the room
-        publishPresenceEvent(room, leaver.getId(), leaver.getUsername(), RoomEvent.EventType.LEFT);
-        // Fetch remaining members
-        final List<RoomMemberResponse> memberResponses = this.roomMemberRepository.findByRoom_Id(room.getId())
+        if (this.chatBotService.isHost(leaver)) {
+            this.chatBotService.markHostInactive(roomId);
+        }
+        publishPresenceEvent(room, leaver, RoomEvent.EventType.LEFT);
+        final List<RoomMemberResponse> memberResponses = this.roomMemberRepository
+                .findByRoom_Id(room.getId())
                 .stream()
                 .map(member -> RoomMemberResponse.builder()
                         .roomId(room.getId())
                         .roomName(room.getRoomName())
                         .userId(member.getUser().getId())
                         .userName(member.getUser().getUsername())
+                        .isHost(this.chatBotService.isHost(member.getUser()))
                         .joinedAt(member.getJoinedAt())
                         .build())
                 .toList();
@@ -325,6 +351,7 @@ public class RoomServiceImpl implements RoomService {
                         .id(owner.getId())
                         .username(owner.getUsername())
                         .email(owner.getEmail())
+                        .isHost(this.chatBotService.isHost(owner))
                         .build())
                 .room(RoomResponse.RoomDetail.builder()
                         .id(room.getId())
@@ -333,6 +360,7 @@ public class RoomServiceImpl implements RoomService {
                         .description(room.getDescription())
                         .owner(owner.getUsername())
                         .roomStatus(room.getStatus())
+                        .isHostOnline(this.chatBotService.isHostOnline(room.getId()))
                         .closedBy(room.getClosedBy() != null
                                 ? room.getClosedBy().getUsername() : null)
                         .closedAt(room.getClosedAt())
@@ -346,6 +374,8 @@ public class RoomServiceImpl implements RoomService {
     @Transactional(propagation = Propagation.REQUIRED, readOnly = true)
     public ScrollResponse<MessageResponse> getMessages(
             final UUID roomId,
+            final String userEmail,
+            final String userName,
             final String keyword, final String scrollId,
             final int pageSize, final String sortBy,
             final String sortDirection, final String scrollDirection
@@ -356,9 +386,69 @@ public class RoomServiceImpl implements RoomService {
         if (keyword != null && !keyword.isBlank()) {
             specification = specification.and(EntitySpecification.searchMessageKeyword(keyword));
         }
+        final boolean callerIsHost;
+        if (userName != null && userEmail != null) {
+            callerIsHost = this.chatBotService.isHost(userName, userEmail);
+        } else if (userEmail != null) {
+            callerIsHost = this.userRepository.findByEmail(userEmail)
+                    .map(this.chatBotService::isHost)
+                    .orElse(false);
+        } else {
+            callerIsHost = false;
+        }
+        if (callerIsHost) {
+            final boolean wasOnline = this.chatBotService.isHostOnline(roomId);
+            this.chatBotService.markHostActive(roomId);
+            if (!wasOnline) {
+                final User hostUser = this.chatBotService.findHostUser();
+                final UUID hId = hostUser != null ? hostUser.getId() : UUID.randomUUID();
+                final String hName = hostUser != null ? hostUser.getUsername() : "Pranit (Host)";
+                this.messagingTemplate.convertAndSend("/topic/room/" + roomId + "/presence",
+                        RoomEvent.builder()
+                                .roomId(roomId)
+                                .userId(hId)
+                                .username(hName)
+                                .eventType(RoomEvent.EventType.HOST_STATUS)
+                                .timestamp(Instant.now())
+                                .roomStatus(RoomStatus.OPEN)
+                                .isHost(true)
+                                .isHostOnline(true)
+                                .build());
+            }
+            specification = specification.and((root, _, cb) ->
+                    cb.and(
+                            cb.notLike(root.get("content"), "%Welcome to Open-Connect!%"),
+                            cb.notLike(root.get("content"), "%currently away/offline%"),
+                            cb.notLike(root.get("content"), "%noted that you're here%"),
+                            cb.notLike(root.get("content"), "%notified that you're here%"),
+                            cb.notLike(root.get("content"), "%notified on my phone%")
+                    ));
+        }
         final List<String> allowedSortProperties = List.of("createdAt", "id");
-        return Scroll.scroll(this.messageRepository, specification, scrollId, pageSize, sortBy, sortDirection, scrollDirection,
+        final ScrollResponse<MessageResponse> response = Scroll.scroll(this.messageRepository, specification, scrollId, pageSize, sortBy, sortDirection, scrollDirection,
                 allowedSortProperties, MessageResponse::from);
+        if (callerIsHost && response.contents() != null) {
+            final List<MessageResponse> filtered = response.contents().stream()
+                    .filter(m -> {
+                        if (m.content() == null || m.content().message() == null) return true;
+                        final String text = m.content().message();
+                        return !text.contains("Welcome to Open-Connect!") &&
+                                !text.contains("currently away/offline") &&
+                                !text.contains("noted that you're here") &&
+                                !text.contains("notified that you're here") &&
+                                !text.contains("notified on my phone");
+                    })
+                    .toList();
+            return ScrollResponse.<MessageResponse>builder()
+                    .contents(filtered)
+                    .nextScrollId(response.nextScrollId())
+                    .prevScrollId(response.prevScrollId())
+                    .hasNext(response.hasNext())
+                    .hasPrevious(response.hasPrevious())
+                    .pageSize(response.pageSize())
+                    .build();
+        }
+        return response;
     }
 
     @Override
@@ -368,14 +458,11 @@ public class RoomServiceImpl implements RoomService {
         if (room.getStatus() == RoomStatus.CLOSED) {
             throw new RoomClosedException("Chat room #" + roomId + " is closed. No further messages can be sent.");
         }
-        // Look up the sender user
         final User sender = this.userRepository.findById(request.senderId())
                 .orElseThrow(() -> new RoomNotFoundException("Sender not found with ID: " + request.senderId()));
-        // Ensure sender is a member of the room
         if (!this.roomMemberRepository.existsByRoomAndUser(room, sender)) {
             throw new BaseException("User " + sender.getUsername() + " is not an active member of room: " + room.getRoomCode());
         }
-        // If the message is a TYPING indicator, broadcast it in real time WITHOUT persisting to database
         if (request.type() == MessageType.TYPING) {
             return MessageResponse.builder()
                     .id(UUID.randomUUID())
@@ -399,7 +486,6 @@ public class RoomServiceImpl implements RoomService {
                     .sentAt(Instant.now())
                     .build();
         }
-        // Only persist actual messages (e.g. CHAT) to the database
         Message message = Message.builder()
                 .room(room)
                 .sender(sender)
@@ -407,7 +493,9 @@ public class RoomServiceImpl implements RoomService {
                 .type(request.type())
                 .build();
         message = this.messageRepository.save(message);
-        return MessageResponse.from(message);
+        final MessageResponse response = MessageResponse.from(message);
+        this.chatBotService.handleVisitorMessage(room, sender, request.content());
+        return response;
     }
 
     private ChatRoom validateAndFetchRoomById(final UUID roomId) {

@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -52,13 +53,17 @@ public class RoomController {
     }
 
     @PatchMapping(value = "/{id}/close", version = "v1")
-    public ResponseEntity<RoomResponse> closeChatRoom(@PathVariable("id") UUID roomId, @RequestBody @Valid OwnerDetail detail) {
+    public ResponseEntity<RoomResponse> closeChatRoom(
+            @PathVariable("id") UUID roomId,
+            @RequestBody @Valid OwnerDetail detail) {
         final RoomResponse response = this.roomService.closeRoom(roomId, detail);
         return ResponseEntity.status(HttpStatus.OK).body(response);
     }
 
     @PatchMapping(value = "/{id}/leave", version = "v1")
-    public ResponseEntity<RoomResponse> leaveChatRoom(@PathVariable("id") UUID roomId, @RequestBody @Valid OwnerDetail detail) {
+    public ResponseEntity<RoomResponse> leaveChatRoom(
+            @PathVariable("id") UUID roomId,
+            @RequestBody @Valid OwnerDetail detail) {
         final RoomResponse response = this.roomService.leaveRoom(roomId, detail);
         return ResponseEntity.status(HttpStatus.OK).body(response);
     }
@@ -66,6 +71,10 @@ public class RoomController {
     @GetMapping(value = "/{id}/messages", version = "v1")
     public ResponseEntity<ScrollResponse<MessageResponse>> getMessages(
             @PathVariable("id") UUID roomId,
+            @RequestParam(required = false) String userEmail,
+            @RequestParam(required = false) String userName,
+            @RequestHeader(value = "X-User-Email", required = false) String headerEmail,
+            @RequestHeader(value = "X-User-Name", required = false) String headerName,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String scrollId,
             @RequestParam(defaultValue = "10") @Min(1) @Max(50) int pageSize,
@@ -73,8 +82,14 @@ public class RoomController {
             @RequestParam(defaultValue = "ASC") String sortDirection,
             @RequestParam(defaultValue = "forward") String scrollDirection
     ) {
-        final ScrollResponse<MessageResponse> response = this.roomService.getMessages(
-                roomId, keyword, scrollId, pageSize, sortBy, sortDirection, scrollDirection);
+        final String effectiveEmail = (userEmail != null && !userEmail.isBlank())
+                ? userEmail.trim() : (headerEmail != null && !headerEmail.isBlank()
+                ? headerEmail.trim() : null);
+        final String effectiveName = (userName != null && !userName.isBlank())
+                ? userName.trim() : (headerName != null && !headerName.isBlank()
+                ? headerName.trim() : null);
+        final ScrollResponse<MessageResponse> response = this.roomService.getMessages
+                (roomId, effectiveEmail, effectiveName, keyword, scrollId, pageSize, sortBy, sortDirection, scrollDirection);
         return ResponseEntity.status(HttpStatus.OK).body(response);
     }
 }
