@@ -1,0 +1,117 @@
+spring:
+  application:
+    name: open-connect
+  threads:
+    virtual:
+      enabled: true
+  # Database Configuration
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      minimum-idle: 10
+      maximum-pool-size: 25
+      connection-timeout: 20000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      leak-detection-threshold: 4000
+      pool-name: ChatPool
+  # JPA Configuration
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+  # Flyway Configuration
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    table: flyway_schema_history
+    baseline-on-migrate: true
+    baseline-version: 1
+    validate-on-migrate: true
+    clean-disabled: true
+    out-of-order: false
+  # Java Mail Sender Configuration
+  mail:
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    protocol: ${MAIL_PROTOCOL}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+# Host Configuration
+host:
+  email: ${HOST_EMAIL}
+  portfolio-url: ${HOST_PORTFOLIO}
+# Security & Message Encryption Configuration
+security:
+  chat:
+    encryption:
+      secret-key: ${CHAT_ENCRYPTION_KEY}
+# Swagger Configuration
+springdoc:
+  default-produces-media-type: application/json
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+# Logging Configuration
+logging:
+  file:
+    name: ${LOG_PATH}
+  level:
+    root: ${LOG_LEVEL_ROOT}
+    com.pranit.connect: ${LOG_LEVEL}
+    org.springframework.web.socket: INFO
+    org.springframework.messaging: DEBUG
+  logback:
+    rollingpolicy:
+      file-name-pattern: ${LOG_PATH}.%d{yyyy-MM-dd}.%i.log.gz
+      max-file-size: 50MB
+      total-size-cap: 1GB
+      max-history: 30
+      clean-history-on-start: false
+# Actuator Configuration
+management:
+  health:
+    mail:
+      enabled: false
+  endpoints:
+    web:
+      exposure:
+        include:
+          - health
+          - info
+      cors:
+        allowed-origin-patterns: "*"
+        allowed-methods:
+          - GET
+          - POST
+          - OPTIONS
+        allowed-headers: "*"
+        allow-credentials: true
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+info:
+  app:
+    name: open-connect
+    description: "open-connect backend engine."
+    version: "1.0.0"
