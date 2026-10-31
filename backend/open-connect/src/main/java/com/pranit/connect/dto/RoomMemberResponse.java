@@ -11,7 +11,6 @@ public record RoomMemberResponse(
         String roomName,
         UUID userId,
         String userName,
-        String userEmail,
         boolean isHost,
         Instant joinedAt
 ) {

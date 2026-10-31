@@ -21,7 +21,7 @@ import java.util.UUID;
 @Table(
         name = "users",
         indexes = {
-                @Index(name = "idx_users_email", columnList = "email")
+                @Index(name = "idx_users_username", columnList = "username")
         }
 )
 @Getter
@@ -35,11 +35,8 @@ public class User {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(nullable = false, length = 50)
+    @Column(nullable = false, unique = true, length = 50)
     private String username;
-
-    @Column(nullable = false, unique = true, length = 254)
-    private String email;
 
     @Builder.Default
     @Column(nullable = false, updatable = false)
