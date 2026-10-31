@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${PORT:8080}
 spring:
   application:
     name: open-connect
@@ -8,13 +8,13 @@ spring:
       enabled: true
   # Database Configuration
   datasource:
-    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:open_connect}}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
     hikari:
-      minimum-idle: 10
-      maximum-pool-size: 25
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:25}
       connection-timeout: 20000
       idle-timeout: 300000
       max-lifetime: 1800000
@@ -23,7 +23,7 @@ spring:
   # JPA Configuration
   jpa:
     hibernate:
-      ddl-auto: none
+      ddl-auto: ${DDL_AUTO:validate}
     show-sql: false
     open-in-view: false
     properties:
@@ -32,7 +32,7 @@ spring:
         format_sql: false
   # Flyway Configuration
   flyway:
-    enabled: true
+    enabled: ${FLYWAY_ENABLED:true}
     locations: classpath:db/migration
     table: flyway_schema_history
     baseline-on-migrate: true
@@ -40,27 +40,22 @@ spring:
     validate-on-migrate: true
     clean-disabled: true
     out-of-order: false
-  # Java Mail Sender Configuration
-  mail:
-    host: ${MAIL_HOST}
-    port: ${MAIL_PORT}
-    username: ${MAIL_USERNAME}
-    password: ${MAIL_PASSWORD}
-    protocol: ${MAIL_PROTOCOL}
-    properties:
-      mail:
-        smtp:
-          auth: true
-          starttls:
-            enable: true
-          connectiontimeout: 5000
-          timeout: 5000
-          writetimeout: 5000
+# CORS Configuration
+cors:
+  allowed-origin-patterns: ${CORS_ALLOWED_ORIGINS:*}
 # Security & Message Encryption Configuration
 security:
   chat:
     encryption:
-      secret-key: ${CHAT_ENCRYPTION_KEY}
+      secret-key: ${CHAT_ENCRYPTION_KEY:OpenConnectEngineSecretKey2026AES256GCM!}
+# Room Lifecycle & Cleanup Scheduler Configuration
+open-connect:
+  cleanup:
+    enabled: ${CLEANUP_ENABLED:true}
+    cron: "${CLEANUP_CRON:0 0 3 * * ?}"
+    unclosed-ttl-hours: ${CLEANUP_UNCLOSED_TTL_HOURS:24}
+    retention-days: ${CLEANUP_RETENTION_DAYS:15}
+    max-batches: ${CLEANUP_MAX_BATCHES:10}
 # Swagger Configuration
 springdoc:
   default-produces-media-type: application/json
@@ -71,15 +66,15 @@ springdoc:
 # Logging Configuration
 logging:
   file:
-    name: ${LOG_PATH}
+    name: ${LOG_PATH:logs/open-connect.log}
   level:
-    root: ${LOG_LEVEL_ROOT}
-    com.pranit.connect: ${LOG_LEVEL}
+    root: ${LOG_LEVEL_ROOT:INFO}
+    com.pranit.connect: ${LOG_LEVEL:DEBUG}
     org.springframework.web.socket: INFO
     org.springframework.messaging: DEBUG
   logback:
     rollingpolicy:
-      file-name-pattern: ${LOG_PATH}.%d{yyyy-MM-dd}.%i.log.gz
+      file-name-pattern: ${LOG_PATH:logs/open-connect.log}.%d{yyyy-MM-dd}.%i.log.gz
       max-file-size: 50MB
       total-size-cap: 1GB
       max-history: 30
