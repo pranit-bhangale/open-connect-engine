@@ -30,6 +30,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.SliceImpl;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
 
 import java.time.Instant;
@@ -66,10 +68,10 @@ class RoomServiceImplTest {
     @InjectMocks
     private RoomServiceImpl roomService;
 
+    private UUID roomId;
     private User owner;
     private User regularUser;
     private ChatRoom room;
-    private UUID roomId;
 
     @BeforeEach
     void setUp() {
@@ -77,14 +79,12 @@ class RoomServiceImplTest {
         owner = User.builder()
                 .id(UUID.randomUUID())
                 .username("alice_owner")
-                .email("alice@example.com")
                 .createdAt(Instant.now())
                 .build();
 
         regularUser = User.builder()
                 .id(UUID.randomUUID())
                 .username("bob_member")
-                .email("bob@example.com")
                 .createdAt(Instant.now())
                 .build();
 
@@ -103,11 +103,11 @@ class RoomServiceImplTest {
     @DisplayName("createNewRoom creates room, sets creator as owner, adds owner to members, and broadcasts JOINED")
     void testCreateNewRoom() {
         final CreateRoom request = new CreateRoom(
-                new CreateRoom.UserRequest("alice_owner", "alice@example.com"),
+                new CreateRoom.UserRequest("alice_owner"),
                 new CreateRoom.RoomRequest("General Chat", "Discussion Room")
         );
 
-        when(userRepository.findByEmail("alice@example.com")).thenReturn(Optional.of(owner));
+        when(userRepository.findByUsername("alice_owner")).thenReturn(Optional.of(owner));
         when(roomRepository.existsByRoomCode(any())).thenReturn(false);
         when(roomRepository.save(any(ChatRoom.class))).thenAnswer(invocation -> {
             ChatRoom r = invocation.getArgument(0);
@@ -137,11 +137,11 @@ class RoomServiceImplTest {
     @DisplayName("joinChatRoom by roomCode adds user to room and notifies room members")
     void testJoinChatRoom_ByRoomCode() {
         final JoinRoom request = new JoinRoom(
-                new JoinRoom.UserRequest("bob_member", "bob@example.com"),
+                new JoinRoom.UserRequest("bob_member"),
                 new JoinRoom.RoomDetail("123456")
         );
 
-        when(userRepository.findByEmail("bob@example.com")).thenReturn(Optional.of(regularUser));
+        when(userRepository.findByUsername("bob_member")).thenReturn(Optional.of(regularUser));
         when(roomRepository.findByRoomCode("123456")).thenReturn(Optional.of(room));
         when(roomMemberRepository.existsByRoomAndUser(room, regularUser)).thenReturn(false);
 
@@ -170,11 +170,11 @@ class RoomServiceImplTest {
     @DisplayName("joinChatRoom by roomId (UUID) allows joining via shared room ID")
     void testJoinChatRoom_ByRoomId() {
         final JoinRoom request = new JoinRoom(
-                new JoinRoom.UserRequest("bob_member", "bob@example.com"),
+                new JoinRoom.UserRequest("bob_member"),
                 new JoinRoom.RoomDetail(null, roomId.toString())
         );
 
-        when(userRepository.findByEmail("bob@example.com")).thenReturn(Optional.of(regularUser));
+        when(userRepository.findByUsername("bob_member")).thenReturn(Optional.of(regularUser));
         when(roomRepository.findByRoomCode(roomId.toString())).thenReturn(Optional.empty());
         when(roomRepository.findById(roomId)).thenReturn(Optional.of(room));
         when(roomMemberRepository.existsByRoomAndUser(room, regularUser)).thenReturn(false);
@@ -192,11 +192,11 @@ class RoomServiceImplTest {
         room.setStatus(RoomStatus.CLOSED);
 
         final JoinRoom request = new JoinRoom(
-                new JoinRoom.UserRequest("bob_member", "bob@example.com"),
+                new JoinRoom.UserRequest("bob_member"),
                 new JoinRoom.RoomDetail("123456")
         );
 
-        when(userRepository.findByEmail("bob@example.com")).thenReturn(Optional.of(regularUser));
+        when(userRepository.findByUsername("bob_member")).thenReturn(Optional.of(regularUser));
         when(roomRepository.findByRoomCode("123456")).thenReturn(Optional.of(room));
 
         assertThatThrownBy(() -> roomService.joinChatRoom(request))
@@ -207,10 +207,10 @@ class RoomServiceImplTest {
     @Test
     @DisplayName("leaveRoom allows regular member to leave, notifies room, and room remains OPEN")
     void testLeaveRoom_RegularMember() {
-        final OwnerDetail detail = new OwnerDetail("bob_member", "bob@example.com");
+        final OwnerDetail detail = new OwnerDetail("bob_member");
 
         when(roomRepository.findById(roomId)).thenReturn(Optional.of(room));
-        when(userRepository.findByEmail("bob@example.com")).thenReturn(Optional.of(regularUser));
+        when(userRepository.findByUsername("bob_member")).thenReturn(Optional.of(regularUser));
         when(roomMemberRepository.existsByRoomAndUser(room, regularUser)).thenReturn(true);
         when(roomMemberRepository.findByRoom_Id(roomId)).thenReturn(List.of());
 
@@ -230,16 +230,15 @@ class RoomServiceImplTest {
     @Test
     @DisplayName("leaveRoom allows owner to leave, sets isHostOnline to false, but room remains OPEN")
     void testLeaveRoom_OwnerLeaves_RoomRemainsOpen() {
-        final OwnerDetail detail = new OwnerDetail("alice_owner", "alice@example.com");
+        final OwnerDetail detail = new OwnerDetail("alice_owner");
 
         when(roomRepository.findById(roomId)).thenReturn(Optional.of(room));
-        when(userRepository.findByEmail("alice@example.com")).thenReturn(Optional.of(owner));
+        when(userRepository.findByUsername("alice_owner")).thenReturn(Optional.of(owner));
         when(roomMemberRepository.existsByRoomAndUser(room, owner)).thenReturn(true).thenReturn(false);
         when(roomMemberRepository.findByRoom_Id(roomId)).thenReturn(List.of());
 
         final RoomResponse response = roomService.leaveRoom(roomId, detail);
 
-        // Room must still be OPEN so other members can chat
         assertThat(response.room().roomStatus()).isEqualTo(RoomStatus.OPEN);
         assertThat(response.user().isHost()).isTrue();
         assertThat(response.room().isHostOnline()).isFalse();
@@ -256,10 +255,10 @@ class RoomServiceImplTest {
     @Test
     @DisplayName("closeRoom succeeds when requested by room owner")
     void testCloseRoom_ByOwner_Success() {
-        final OwnerDetail detail = new OwnerDetail("alice_owner", "alice@example.com");
+        final OwnerDetail detail = new OwnerDetail("alice_owner");
 
         when(roomRepository.findById(roomId)).thenReturn(Optional.of(room));
-        when(userRepository.findByEmail("alice@example.com")).thenReturn(Optional.of(owner));
+        when(userRepository.findByUsername("alice_owner")).thenReturn(Optional.of(owner));
         when(roomRepository.save(any(ChatRoom.class))).thenAnswer(i -> i.getArgument(0));
         when(roomMemberRepository.findByRoom_Id(roomId)).thenReturn(List.of());
 
@@ -278,10 +277,10 @@ class RoomServiceImplTest {
     @Test
     @DisplayName("closeRoom by non-owner is rejected with RoomOperationNotAllowedException")
     void testCloseRoom_ByNonOwner_Fails() {
-        final OwnerDetail detail = new OwnerDetail("bob_member", "bob@example.com");
+        final OwnerDetail detail = new OwnerDetail("bob_member");
 
         when(roomRepository.findById(roomId)).thenReturn(Optional.of(room));
-        when(userRepository.findByEmail("bob@example.com")).thenReturn(Optional.of(regularUser));
+        when(userRepository.findByUsername("bob_member")).thenReturn(Optional.of(regularUser));
 
         assertThatThrownBy(() -> roomService.closeRoom(roomId, detail))
                 .isInstanceOf(RoomOperationNotAllowedException.class)
@@ -292,10 +291,10 @@ class RoomServiceImplTest {
     @DisplayName("closeRoom throws RoomClosedException if room is already CLOSED")
     void testCloseRoom_AlreadyClosed_Fails() {
         room.setStatus(RoomStatus.CLOSED);
-        final OwnerDetail detail = new OwnerDetail("alice_owner", "alice@example.com");
+        final OwnerDetail detail = new OwnerDetail("alice_owner");
 
         when(roomRepository.findById(roomId)).thenReturn(Optional.of(room));
-        when(userRepository.findByEmail("alice@example.com")).thenReturn(Optional.of(owner));
+        when(userRepository.findByUsername("alice_owner")).thenReturn(Optional.of(owner));
 
         assertThatThrownBy(() -> roomService.closeRoom(roomId, detail))
                 .isInstanceOf(RoomClosedException.class)
@@ -363,7 +362,7 @@ class RoomServiceImplTest {
                 .createdAt(cutoff.minusSeconds(100))
                 .build();
 
-        when(roomRepository.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(RoomStatus.OPEN, cutoff))
+        when(roomRepository.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq(RoomStatus.OPEN), eq(cutoff)))
                 .thenReturn(List.of(staleRoom));
         when(roomRepository.save(any(ChatRoom.class))).thenAnswer(i -> i.getArgument(0));
 

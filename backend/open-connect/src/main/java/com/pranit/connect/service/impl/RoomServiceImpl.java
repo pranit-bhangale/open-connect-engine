@@ -56,7 +56,7 @@ public class RoomServiceImpl implements RoomService {
     public RoomResponse createNewRoom(final CreateRoom request) {
         final CreateRoom.UserRequest ur = request.user();
         final CreateRoom.RoomRequest rr = request.room();
-        final User owner = findOrCreateUser(ur.email(), ur.username());
+        final User owner = findOrCreateUser(ur.username());
         final String roomCode = generateRoomCode();
         ChatRoom room = ChatRoom.builder()
                 .roomCode(roomCode)
@@ -78,7 +78,6 @@ public class RoomServiceImpl implements RoomService {
                 .user(RoomResponse.UserResponse.builder()
                         .id(owner.getId())
                         .username(owner.getUsername())
-                        .email(owner.getEmail())
                         .isHost(true)
                         .build())
                 .room(buildRoomDetail(room, memberResponses, true))
@@ -97,7 +96,6 @@ public class RoomServiceImpl implements RoomService {
                 .user(owner != null ? RoomResponse.UserResponse.builder()
                         .id(owner.getId())
                         .username(owner.getUsername())
-                        .email(owner.getEmail())
                         .isHost(true)
                         .build() : null)
                 .room(buildRoomDetail(room, members, hostOnline))
@@ -117,7 +115,6 @@ public class RoomServiceImpl implements RoomService {
                 .user(owner != null ? RoomResponse.UserResponse.builder()
                         .id(owner.getId())
                         .username(owner.getUsername())
-                        .email(owner.getEmail())
                         .isHost(true)
                         .build() : null)
                 .room(buildRoomDetail(room, members, hostOnline))
@@ -129,7 +126,7 @@ public class RoomServiceImpl implements RoomService {
     public RoomResponse joinChatRoom(final JoinRoom request) {
         final JoinRoom.UserRequest ur = request.user();
         final JoinRoom.RoomDetail dr = request.detail();
-        final User user = findOrCreateUser(ur.email(), ur.username());
+        final User user = findOrCreateUser(ur.username());
         final String identifier = dr.getIdentifier();
         if (identifier == null || identifier.isBlank()) {
             throw new RoomNotFoundException("Room identifier (code or id) is required");
@@ -147,7 +144,6 @@ public class RoomServiceImpl implements RoomService {
                     .build();
             this.roomMemberRepository.save(member);
         }
-
         final User roomOwner = room.getOwner();
         final boolean isCallerOwner = roomOwner != null && user.getId().equals(roomOwner.getId());
         publishPresenceEvent(room, user, RoomEvent.EventType.JOINED);
@@ -158,7 +154,6 @@ public class RoomServiceImpl implements RoomService {
                 .user(RoomResponse.UserResponse.builder()
                         .id(user.getId())
                         .username(user.getUsername())
-                        .email(user.getEmail())
                         .isHost(isCallerOwner)
                         .build())
                 .room(buildRoomDetail(room, members, hostOnline))
@@ -169,12 +164,12 @@ public class RoomServiceImpl implements RoomService {
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public RoomResponse closeRoom(final UUID roomId, final OwnerDetail detail) {
         final ChatRoom room = validateAndFetchRoomById(roomId);
-        final User closer = this.userRepository.findByEmail(detail.email())
-                .orElseThrow(() -> new RoomNotFoundException("User not found with email: " + detail.email()));
+        final User closer = this.userRepository.findByUsername(detail.username().trim())
+                .orElseThrow(() -> new RoomNotFoundException("User not found with name: " + detail.username()));
         final User owner = room.getOwner();
         final boolean isOwner = owner != null && (
                 owner.getId().equals(closer.getId()) ||
-                owner.getEmail().trim().equalsIgnoreCase(closer.getEmail().trim())
+                owner.getUsername().trim().equalsIgnoreCase(closer.getUsername().trim())
         );
         if (!isOwner) {
             throw new RoomOperationNotAllowedException("Only the room owner who created the room can close this chat room.");
@@ -192,7 +187,6 @@ public class RoomServiceImpl implements RoomService {
                 .user(RoomResponse.UserResponse.builder()
                         .id(owner.getId())
                         .username(owner.getUsername())
-                        .email(owner.getEmail())
                         .isHost(true)
                         .build())
                 .room(buildRoomDetail(savedRoom, memberResponses, false))
@@ -203,8 +197,8 @@ public class RoomServiceImpl implements RoomService {
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public RoomResponse leaveRoom(final UUID roomId, final OwnerDetail detail) {
         final ChatRoom room = validateAndFetchRoomById(roomId);
-        final User leaver = this.userRepository.findByEmail(detail.email())
-                .orElseThrow(() -> new RoomNotFoundException("User not found with email: " + detail.email()));
+        final User leaver = this.userRepository.findByUsername(detail.username().trim())
+                .orElseThrow(() -> new RoomNotFoundException("User not found with name: " + detail.username()));
         if (!this.roomMemberRepository.existsByRoomAndUser(room, leaver)) {
             throw new RoomNotFoundException("User " + leaver.getUsername() + " is not a member of room: " + room.getRoomCode());
         }
@@ -212,7 +206,7 @@ public class RoomServiceImpl implements RoomService {
         final User owner = room.getOwner();
         final boolean isLeaverOwner = owner != null && (
                 owner.getId().equals(leaver.getId()) ||
-                owner.getEmail().trim().equalsIgnoreCase(leaver.getEmail().trim())
+                owner.getUsername().trim().equalsIgnoreCase(leaver.getUsername().trim())
         );
         publishPresenceEvent(room, leaver, RoomEvent.EventType.LEFT);
         final boolean hostOnline = owner != null &&
@@ -222,7 +216,6 @@ public class RoomServiceImpl implements RoomService {
                 .user(RoomResponse.UserResponse.builder()
                         .id(leaver.getId())
                         .username(leaver.getUsername())
-                        .email(leaver.getEmail())
                         .isHost(isLeaverOwner)
                         .build())
                 .room(buildRoomDetail(room, memberResponses, hostOnline))
@@ -233,7 +226,6 @@ public class RoomServiceImpl implements RoomService {
     @Transactional(propagation = Propagation.REQUIRED, readOnly = true)
     public ScrollResponse<MessageResponse> getMessages(
             final UUID roomId,
-            final String userEmail,
             final String userName,
             final String keyword, final String scrollId,
             final int pageSize, final String sortBy,
@@ -298,31 +290,38 @@ public class RoomServiceImpl implements RoomService {
     @Override
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public int cleanupStaleUnclosedRooms(final Instant cutoff) {
-        final List<ChatRoom> staleRooms = this.roomRepository
-                .findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(RoomStatus.OPEN, cutoff);
-        if (staleRooms.isEmpty()) return 0;
-        int count = 0;
-        for (final ChatRoom room : staleRooms) {
-            room.setStatus(RoomStatus.CLOSED);
-            room.setClosedAt(Instant.now());
-            this.roomRepository.save(room);
-            final RoomEvent closeEvent = RoomEvent.builder()
-                    .roomId(room.getId())
-                    .roomCode(room.getRoomCode())
-                    .eventType(RoomEvent.EventType.CLOSED)
-                    .message("Room was automatically closed due to inactivity timeout.")
-                    .timestamp(Instant.now())
-                    .roomStatus(RoomStatus.CLOSED)
-                    .isHost(false)
-                    .isHostOnline(false)
-                    .memberCount(0)
-                    .build();
-            this.messagingTemplate.convertAndSend("/topic/room/" + room.getId() + "/presence", closeEvent);
-            this.messagingTemplate.convertAndSend("/topic/room/" + room.getId(), closeEvent);
-            count++;
+        final int maxBatches = 10;
+        int totalClosed = 0;
+        int batchCount = 0;
+        while (batchCount < maxBatches) {
+            final List<ChatRoom> staleRooms = this.roomRepository
+                    .findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(RoomStatus.OPEN, cutoff);
+            if (staleRooms.isEmpty()) break;
+            for (final ChatRoom room : staleRooms) {
+                try {
+                    room.setStatus(RoomStatus.CLOSED);
+                    room.setClosedAt(Instant.now());
+                    room.setClosedBy(room.getOwner());
+                    this.roomRepository.save(room);
+                    publishPresenceEvent(
+                            room,
+                            room.getOwner() != null ? room.getOwner().getId() : null,
+                            "System Auto-Cleanup",
+                            RoomEvent.EventType.CLOSED,
+                            true
+                    );
+                    totalClosed++;
+                } catch (Exception ex) {
+                    log.error("Failed to auto-close stale room id={}: {}", room.getId(), ex.getMessage(), ex);
+                }
+            }
+            batchCount++;
+            if (staleRooms.size() < 100) break;
         }
-        log.info("Cleaned up and auto-closed {} stale unclosed room(s) created before {}", count, cutoff);
-        return count;
+        if (totalClosed > 0) {
+            log.info("Auto-cleanup completed: closed {} stale open rooms older than cutoff {}", totalClosed, cutoff);
+        }
+        return totalClosed;
     }
 
     private ChatRoom validateAndFetchRoomById(final UUID roomId) {
@@ -342,23 +341,16 @@ public class RoomServiceImpl implements RoomService {
         throw new RoomNotFoundException("Room not found with code or ID: " + identifier);
     }
 
-    private User findOrCreateUser(final String email, final String username) {
-        return this.userRepository.findByEmail(email)
-                .map(existing -> {
-                    if (!existing.getUsername().equals(username)) {
-                        existing.setUsername(username);
-                        return this.userRepository.save(existing);
-                    }
-                    return existing;
-                })
+    private User findOrCreateUser(final String username) {
+        final String trimmed = username.trim();
+        return this.userRepository.findByUsername(trimmed)
                 .orElseGet(() -> {
                     try {
                         return this.userRepository.save(User.builder()
-                                .username(username)
-                                .email(email)
+                                .username(trimmed)
                                 .build());
                     } catch (DataIntegrityViolationException ex) {
-                        return this.userRepository.findByEmail(email).orElseThrow(() -> ex);
+                        return this.userRepository.findByUsername(trimmed).orElseThrow(() -> ex);
                     }
                 });
     }
@@ -401,7 +393,6 @@ public class RoomServiceImpl implements RoomService {
                 .memberCount(memberCount)
                 .build();
         this.messagingTemplate.convertAndSend("/topic/room/" + room.getId() + "/presence", event);
-        this.messagingTemplate.convertAndSend("/topic/room/" + room.getId(), event);
     }
 
     private List<RoomMemberResponse> mapMembers(final ChatRoom room) {
@@ -413,7 +404,6 @@ public class RoomServiceImpl implements RoomService {
                         .roomName(m.getRoom().getRoomName())
                         .userId(m.getUser().getId())
                         .userName(m.getUser().getUsername())
-                        .userEmail(m.getUser().getEmail())
                         .isHost(owner != null && m.getUser().getId().equals(owner.getId()))
                         .joinedAt(m.getJoinedAt())
                         .build())

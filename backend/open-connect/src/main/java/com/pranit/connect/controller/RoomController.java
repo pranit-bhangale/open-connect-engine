@@ -89,9 +89,7 @@ public class RoomController {
     @GetMapping(value = "/{id}/messages", version = "v1")
     public ResponseEntity<ScrollResponse<MessageResponse>> getMessages(
             @PathVariable("id") UUID roomId,
-            @RequestParam(required = false) String userEmail,
             @RequestParam(required = false) String userName,
-            @RequestHeader(value = "X-User-Email", required = false) String headerEmail,
             @RequestHeader(value = "X-User-Name", required = false) String headerName,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String scrollId,
@@ -100,14 +98,11 @@ public class RoomController {
             @RequestParam(defaultValue = "ASC") String sortDirection,
             @RequestParam(defaultValue = "forward") String scrollDirection
     ) {
-        final String effectiveEmail = (userEmail != null && !userEmail.isBlank())
-                ? userEmail.trim() : (headerEmail != null && !headerEmail.isBlank()
-                ? headerEmail.trim() : null);
         final String effectiveName = (userName != null && !userName.isBlank())
                 ? userName.trim() : (headerName != null && !headerName.isBlank()
                 ? headerName.trim() : null);
         final ScrollResponse<MessageResponse> response = this.roomService.getMessages
-                (roomId, effectiveEmail, effectiveName, keyword, scrollId, pageSize, sortBy, sortDirection, scrollDirection);
+                (roomId, effectiveName, keyword, scrollId, pageSize, sortBy, sortDirection, scrollDirection);
         return ResponseEntity.status(HttpStatus.OK).body(response);
     }
 }

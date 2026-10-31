@@ -16,7 +16,6 @@ public record RoomResponse(
     public record UserResponse(
             UUID id,
             String username,
-            String email,
             boolean isHost
     ) {
     }

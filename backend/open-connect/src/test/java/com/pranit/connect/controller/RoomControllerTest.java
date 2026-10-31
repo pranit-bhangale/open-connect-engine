@@ -77,8 +77,7 @@ class RoomControllerTest {
         final String json = """
                 {
                     "user": {
-                        "username": "alice",
-                        "email": "alice@example.com"
+                        "username": "alice"
                     },
                     "room": {
                         "roomName": "Engineering",
@@ -91,7 +90,6 @@ class RoomControllerTest {
                 .user(RoomResponse.UserResponse.builder()
                         .id(UUID.randomUUID())
                         .username("alice")
-                        .email("alice@example.com")
                         .isHost(true)
                         .build())
                 .room(RoomResponse.RoomDetail.builder()
@@ -166,8 +164,7 @@ class RoomControllerTest {
         final String json = """
                 {
                     "user": {
-                        "username": "bob",
-                        "email": "bob@example.com"
+                        "username": "bob"
                     },
                     "detail": {
                         "roomCode": "456789"
@@ -179,7 +176,6 @@ class RoomControllerTest {
                 .user(RoomResponse.UserResponse.builder()
                         .id(UUID.randomUUID())
                         .username("bob")
-                        .email("bob@example.com")
                         .isHost(false)
                         .build())
                 .room(RoomResponse.RoomDetail.builder()
@@ -205,8 +201,7 @@ class RoomControllerTest {
     void testCloseRoom_ByOwner() throws Exception {
         final String json = """
                 {
-                    "username": "alice",
-                    "email": "alice@example.com"
+                    "username": "alice"
                 }
                 """;
 
@@ -234,8 +229,7 @@ class RoomControllerTest {
     void testCloseRoom_ByNonOwner_ReturnsForbidden() throws Exception {
         final String json = """
                 {
-                    "username": "charlie",
-                    "email": "charlie@example.com"
+                    "username": "charlie"
                 }
                 """;
 
@@ -255,8 +249,7 @@ class RoomControllerTest {
     void testLeaveRoom() throws Exception {
         final String json = """
                 {
-                    "username": "bob",
-                    "email": "bob@example.com"
+                    "username": "bob"
                 }
                 """;
 
