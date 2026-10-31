@@ -1,0 +1,10 @@
+.git
+.gitignore
+.idea
+*.iml
+backend/open-connect/.gradle
+backend/open-connect/build
+frontend/open-connect/node_modules
+frontend/open-connect/dist
+logs
+*.log
